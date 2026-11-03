@@ -2,31 +2,46 @@
 
 **Systematic literature reviews, from a single search box.**
 
-Litview is a browser-based tool for running a systematic literature review (SLR). Describe a research topic, refine the search, and Litview searches open scholarly databases, removes duplicates, helps you screen each study and drafts the review with a PRISMA 2020 flow diagram.
+Litview is a web app for running a systematic literature review (SLR). Describe a research topic, refine the search, and Litview searches scholarly databases, removes duplicates, helps you and your colleagues screen each study and drafts the review with a PRISMA 2020 flow diagram.
+
+**Live site:** https://don-0mar.github.io/Litview/
 
 ## Features
 
-- **Topic search:** type what you want to research. Litview builds a Boolean search string from it, or you can write your own.
-- **Refine search:** set the publication years, databases, study types (journal articles, conference papers, reviews, preprints, books, book chapters, case studies), open access, abstract availability, language, minimum citations, and inclusion and exclusion terms.
-- **Live databases:** OpenAlex, Crossref, Europe PMC and arXiv, plus the ScienceDirect (Elsevier), Taylor & Francis, Wiley, Springer, Emerald, IEEE Xplore and ACM collections, searched through each publisher's DOI records in Crossref. Missing abstracts are filled in from OpenAlex.
-- **Login databases:** for Scopus, ProQuest, JSTOR and EBSCOhost, Litview writes the search string in each database's own syntax. You run it there, export the results and import the RIS, BibTeX or CSV file.
-- **Deduplication:** by DOI and normalised title, across every source.
-- **Screening:** records that fail your criteria are excluded automatically with a reason. You include or exclude the rest, with reasons.
-- **PRISMA 2020 flow diagram:** updates live as you screen.
-- **Analysis:** publications per year, top venues, most-cited studies and recurring terms.
-- **Report draft:** introduction, method, results with figures, limitations and APA references. Export it as Markdown, with the included studies as BibTeX, RIS or CSV.
+**Search**
+- Type a topic and Litview builds a Boolean search string from it, or write your own.
+- Refine by years, databases, study type (journal articles, conference papers, reviews, preprints, books, book chapters, case studies), open access, abstracts, language, citations, and inclusion and exclusion terms.
+- **Searched automatically:** OpenAlex, Crossref, Europe PMC, arXiv, and the ScienceDirect, Taylor & Francis, Wiley, Springer, Emerald, IEEE Xplore and ACM collections. Missing abstracts are filled in from OpenAlex.
+- **Login databases:** for Scopus, ProQuest, JSTOR and EBSCOhost, Litview writes the search string in each database's syntax and imports the RIS, BibTeX or CSV file you export. Scopus is searched directly when the server has an API key.
 
-## How it works
+**Screening**
+- Duplicates are removed by DOI and normalised title. Records that fail your criteria are excluded automatically, with a reason.
+- **Team screening:** invite colleagues with a code. Everyone screens blind, disagreements go to a Conflicts list for the owner to settle, and agreement is reported as Cohen's kappa.
 
-Litview is a single static HTML file with no build step, server or API keys. All searches run in your browser against the free public APIs of OpenAlex, Crossref, Europe PMC and arXiv, and nothing is stored anywhere.
+**Results**
+- A live PRISMA 2020 flow diagram, publications per year, top venues, most-cited studies and recurring terms.
+- **Report draft:** introduction, method, results with figures, limitations and APA references, exported as Markdown, BibTeX, RIS or CSV.
+- **AI-assisted synthesis:** drafts themes, a discussion, research gaps and a conclusion from the included studies' abstracts, citing only those studies.
 
-## Run it
+**Accounts:** sign in to save reviews and come back to them.
 
-- **Online:** open the GitHub Pages site for this repository.
-- **Locally:** download `index.html` and open it in a browser.
+## Architecture
 
-The draft report is a structured starting point. The thematic synthesis, discussion and conclusions are left for the researcher to write and are marked as to-dos in the draft.
+```
+index.html, assets/     Front end: HTML, CSS and vanilla JavaScript, hosted on GitHub Pages
+server/                 Back end: Node.js + Express + PostgreSQL REST API, hosted on Render
+render.yaml             Render deployment blueprint
+```
+
+The front end works on its own in the browser, without accounts. When the `litview-api` meta tag in `index.html` points at the API, it adds accounts, saved reviews, team screening, server-side search and AI synthesis. See [server/README.md](server/README.md) for the API, its tests and deployment.
+
+## Run it locally
+
+- **Front end only:** open `index.html` in a browser, or run `python3 -m http.server` in this folder.
+- **With the API:** follow [server/README.md](server/README.md).
 
 ## Built with
 
-HTML, CSS and vanilla JavaScript, with no frameworks.
+HTML, CSS and vanilla JavaScript on the front end; Node.js, Express 5, PostgreSQL, JWT and Zod on the back end; tested with `node:test`, Supertest and Playwright.
+
+The draft report is a structured starting point. Synthesis, whether written by you or drafted with AI, must be checked against the full texts of the included studies.

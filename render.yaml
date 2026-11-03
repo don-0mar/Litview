@@ -1,0 +1,29 @@
+# Render Blueprint for the Litview API. In Render: New > Blueprint > pick this repo.
+services:
+  - type: web
+    name: litview-api
+    runtime: node
+    plan: free
+    rootDir: server
+    buildCommand: npm ci --omit=dev
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL        # paste your Neon connection string
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      - key: ALLOWED_ORIGINS
+        value: https://don-0mar.github.io
+      - key: CONTACT_EMAIL
+        sync: false
+      - key: ANTHROPIC_API_KEY   # optional: turns on AI synthesis
+        sync: false
+      - key: SCOPUS_API_KEY      # optional
+        sync: false
+      - key: IEEE_API_KEY        # optional
+        sync: false
+      - key: SPRINGER_API_KEY    # optional
+        sync: false
