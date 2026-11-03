@@ -9,6 +9,7 @@ import { fakeFetch } from "./helpers.js";
 const config = loadConfig({
   DATABASE_URL: process.env.TEST_DATABASE_URL || "postgres://litview:litview@localhost:5432/litview_test",
   JWT_SECRET: "e2e", ALLOWED_ORIGINS: "http://localhost:8080", ANTHROPIC_API_KEY: "fake",
+  PUBLIC_API_URL: "http://localhost:3001", GOOGLE_CLIENT_ID: "g", GOOGLE_CLIENT_SECRET: "g", LINKEDIN_CLIENT_ID: "l", LINKEDIN_CLIENT_SECRET: "l",
 });
 const pool = createPool(config);
 await pool.query("DROP SCHEMA public CASCADE; CREATE SCHEMA public;");
@@ -21,6 +22,8 @@ const oaWork = (i) => ({ id: `W${i}`, doi: `https://doi.org/10.5555/lit.${i}`, t
   open_access: { is_oa: i % 2 === 0 }, abstract_inverted_index: Object.fromEntries(`This study examines ${topics[i % 8]} in IT outsourcing among SMEs using a survey of managers`.split(" ").map((w, k) => [w + (k > 0 && w === "IT" ? "" : ""), [k]])), type: "article", language: "en" });
 
 const fetch = fakeFetch([
+  [u => u === "https://oauth2.googleapis.com/token", () => ({ json: { access_token: "t" } })],
+  [u => u.startsWith("https://openidconnect.googleapis.com/"), () => ({ json: { sub: "g-1", name: "Omar Hassan", email: "omar@gmail.com", email_verified: true } })],
   [u => u.startsWith("https://api.openalex.org/works?filter=doi"), () => ({ json: { results: [] } })],
   [u => u.startsWith("https://api.openalex.org/"), () => ({ json: { meta: { count: 812 }, results: Array.from({ length: 10 }, (_, i) => oaWork(i + 1)) } })],
   [u => u.startsWith("https://api.crossref.org/"), () => ({ json: { message: { "total-results": 2400, items: [3, 4, 11, 12].map(i => ({

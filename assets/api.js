@@ -57,6 +57,8 @@
     async register(name, email, password) { this.setSession(await this.req("POST", "/api/auth/register", { name, email, password })); },
     async login(email, password) { this.setSession(await this.req("POST", "/api/auth/login", { email, password })); },
     signOut() { this.setSession(null); },
+    oauthStartUrl(provider, returnUrl) { return `${base}/api/auth/oauth/${provider}/start?return=${encodeURIComponent(returnUrl)}`; },
+    async oauthExchange(code) { this.setSession(await this.req("POST", "/api/auth/oauth/exchange", { code })); },
     async checkSession() {
       if (!this.token) return;
       try { const { user } = await this.req("GET", "/api/auth/me"); this.user = user; store.set("litview.user", JSON.stringify(user)); }

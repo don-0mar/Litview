@@ -39,6 +39,9 @@ All bodies are JSON. Routes marked 🔒 need `Authorization: Bearer <token>`.
 | POST | `/api/auth/register` | Create an account. Returns `{ token, user }` |
 | POST | `/api/auth/login` | Sign in. Returns `{ token, user }` |
 | GET | `/api/auth/me` 🔒 | The signed-in user |
+| GET | `/api/auth/oauth/:provider/start` | Start signing in with `google`, `facebook`, `x` or `linkedin` |
+| GET | `/api/auth/oauth/:provider/callback` | Where the provider sends people back |
+| POST | `/api/auth/oauth/exchange` | Swap the one-time sign-in code for `{ token, user }` |
 | GET | `/api/sources` | Which databases this server can search and whether AI is on |
 | POST | `/api/search/:source` | Search one database (`openalex`, `crossref`, `europepmc`, `arxiv`, `sciencedirect`, `tandf`, `wiley`, `springer`, `emerald`, `ieee`, `acm`, and `scopus` 🔒 when a key is set) |
 | POST | `/api/enrich` | Abstracts, citations and open-access status from OpenAlex for up to 50 DOIs |
@@ -60,8 +63,20 @@ All bodies are JSON. Routes marked 🔒 need `Authorization: Bearer <token>`.
 - **Blind screening is enforced by the server.** A reviewer only receives their own decisions. Other reviewers' decisions are revealed only for records in conflict.
 - **Agreement** is Cohen's kappa for each pair of reviewers, over the records both decided, with Landis and Koch labels (`src/services/screening.js`).
 - **AI synthesis is limited to the review's own studies.** The server looks up the included records itself, sends only their titles and abstracts, and removes any citation to a study ID that wasn't in the list before saving the draft (`src/services/ai.js`).
+- **Social sign-in uses the OAuth 2.0 authorization code flow** with PKCE where the provider supports it (Google, X). The state and verifier travel in a signed, ten-minute, HttpOnly cookie. The provider sends the person back to `oauth.html` with a one-time code that expires after two minutes, which the front end swaps for a session token, so the token never appears in a URL. Provider accounts are linked to an existing Litview account only when the provider confirms the email is verified.
 - **API keys stay on the server.** Scopus, IEEE and Springer keys are never returned to the browser, and keyed searches need an account so they can't be used as an open proxy.
 - **Retrieved records are stored per database** (`review_sources`), so deduplication can be re-run whenever a new export is imported.
+
+## Social sign-in setup
+
+Create an OAuth app with each provider, register the callback URL `https://<your-api>/api/auth/oauth/<provider>/callback`, and put the client ID and secret in the environment variables listed in `.env.example`. Buttons only appear for providers that are configured.
+
+| Provider | Where to create the app | Scopes Litview asks for |
+|---|---|---|
+| Google | Google Cloud Console → APIs & Services → Credentials → OAuth client ID (Web application) | `openid email profile` |
+| Facebook | developers.facebook.com → Create app → Facebook Login | `email`, `public_profile` |
+| X | developer.x.com → your app → User authentication settings (OAuth 2.0, Web App, confidential client) | `users.read tweet.read` (+ `users.email` if approved) |
+| LinkedIn | linkedin.com/developers → Create app → add "Sign In with LinkedIn using OpenID Connect" | `openid profile email` |
 
 ## Deploy (Render + Neon)
 

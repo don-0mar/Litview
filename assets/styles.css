@@ -229,3 +229,9 @@ footer{color:var(--muted);font-size:.86rem;padding:30px 0 40px;border-top:1px so
 .aibox p{margin:0;max-width:60ch;font-size:.94rem}
 .doc .ainote{font-family:var(--sans);font-size:.88rem;color:var(--muted);border:1px solid var(--rule);border-radius:var(--r-sm);padding:8px 12px}
 .doc .ai{border-left:3px solid var(--blue);padding-left:12px}
+
+/* ---------- social sign-in ---------- */
+.social-btns{display:grid;gap:8px}
+.social-btns .btn{width:100%;text-align:center;padding:10px 14px}
+.or{display:flex;align-items:center;gap:10px;color:var(--muted);font-size:.86rem;margin:18px 0 14px}
+.or::before,.or::after{content:"";flex:1;border-top:1px solid var(--rule)}

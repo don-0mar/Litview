@@ -27,3 +27,19 @@ services:
         sync: false
       - key: SPRINGER_API_KEY    # optional
         sync: false
+      - key: GOOGLE_CLIENT_ID         # optional: sign in with Google
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: FACEBOOK_CLIENT_ID         # optional: sign in with Facebook
+        sync: false
+      - key: FACEBOOK_CLIENT_SECRET
+        sync: false
+      - key: X_CLIENT_ID         # optional: sign in with X
+        sync: false
+      - key: X_CLIENT_SECRET
+        sync: false
+      - key: LINKEDIN_CLIENT_ID         # optional: sign in with LinkedIn
+        sync: false
+      - key: LINKEDIN_CLIENT_SECRET
+        sync: false

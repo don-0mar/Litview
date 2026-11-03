@@ -23,6 +23,13 @@ export function loadConfig(env = process.env) {
       springer: env.SPRINGER_API_KEY || "",
       anthropic: env.ANTHROPIC_API_KEY || "",
     },
+    // Public address of this API, used to build OAuth callback URLs. Render sets RENDER_EXTERNAL_URL.
+    publicUrl: (env.PUBLIC_API_URL || env.RENDER_EXTERNAL_URL || `http://localhost:${Number(env.PORT) || 3000}`).replace(/\/+$/, ""),
+    oauth: Object.fromEntries(["google", "facebook", "x", "linkedin"].map(p => {
+      const P = p.toUpperCase();
+      return [p, { clientId: env[`${P}_CLIENT_ID`] || "", clientSecret: env[`${P}_CLIENT_SECRET`] || "" }];
+    })),
+    xRequestEmail: env.X_REQUEST_EMAIL === "true",
     aiModel: env.ANTHROPIC_MODEL || "claude-sonnet-5-5",
     aiMaxStudies: Number(env.AI_MAX_STUDIES) || 120,
   };

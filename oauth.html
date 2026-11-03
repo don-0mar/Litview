@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Signing in — Litview</title>
+<style>
+  body{margin:0;min-height:100vh;display:grid;place-items:center;background:#EEF1F4;color:#1C2333;font:16px/1.5 system-ui,sans-serif}
+  main{max-width:360px;padding:24px;text-align:center}
+  a{color:#2F5D8A}
+</style>
+</head>
+<body>
+<main><p id="msg">Finishing sign-in…</p></main>
+<script>
+// The Litview API sends people back here with #code=... or #error=... after Google, Facebook, X or LinkedIn.
+// In a pop-up, pass the result to the Litview tab and close; otherwise go back to Litview with it.
+(() => {
+  const p = new URLSearchParams(location.hash.slice(1));
+  const result = { code: p.get("code"), error: p.get("error"), at: Date.now() };
+  history.replaceState(null, "", location.pathname + location.search);
+  const popup = new URLSearchParams(location.search).get("popup") === "1";
+  const msg = document.getElementById("msg");
+  if (popup) {
+    try { new BroadcastChannel("litview-auth").postMessage(result); } catch {}
+    try { localStorage.setItem("litview.oauthResult", JSON.stringify(result)); } catch {}
+    msg.textContent = result.error ? result.error : "You're signed in. You can close this window.";
+    if (!result.error) setTimeout(() => window.close(), 300);
+  } else {
+    try { sessionStorage.setItem("litview.oauthResult", JSON.stringify(result)); } catch {}
+    let back = "./";
+    try { back = sessionStorage.getItem("litview.returnTo") || "./"; } catch {}
+    location.replace(back);
+    msg.innerHTML = 'Signed in. <a href="./">Back to Litview</a>';
+  }
+})();
+</script>
+</body>
+</html>

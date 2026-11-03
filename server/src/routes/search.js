@@ -4,6 +4,7 @@ import rateLimit from "express-rate-limit";
 import { parse } from "../lib/http.js";
 import { authenticate } from "../middleware/auth.js";
 import { availableSources, searchSource, enrichDois } from "../services/sources/index.js";
+import { enabledProviders } from "../services/oauth.js";
 
 export const SearchOpts = z.object({
   query: z.string().trim().min(1).max(1000),
@@ -30,7 +31,7 @@ export function searchRoutes({ config, fetch, log }) {
   const KEYED = new Set(["scopus"]);
 
   r.get("/sources", (_req, res) => {
-    res.json({ ...availableSources(config), ai: !!config.keys.anthropic });
+    res.json({ ...availableSources(config), ai: !!config.keys.anthropic, oauth: enabledProviders(config) });
   });
 
   // Searches that spend a paid API quota need an account.

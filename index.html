@@ -239,6 +239,10 @@
   <form method="dialog" id="authForm" novalidate>
     <h2 id="authTitle">Sign in</h2>
     <p class="sub" id="authSub">Save your reviews, screen with a colleague and draft the synthesis with AI.</p>
+    <div class="social" id="socialBox" hidden>
+      <div class="social-btns" id="socialBtns"></div>
+      <p class="or"><span>or use your email</span></p>
+    </div>
     <div class="field" id="nameField" hidden><label for="authName">Name</label><input id="authName" autocomplete="name"></div>
     <div class="field"><label for="authEmail">Email</label><input id="authEmail" type="email" autocomplete="email" required></div>
     <div class="field"><label for="authPass">Password</label><input id="authPass" type="password" autocomplete="current-password" required minlength="8"><p class="hint" id="passHint" hidden>At least 8 characters.</p></div>

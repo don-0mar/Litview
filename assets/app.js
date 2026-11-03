@@ -1159,6 +1159,7 @@ function openAuth(mode = "signin", then = null) {
   $("#nameField").hidden = !up; $("#passHint").hidden = !up;
   $("#authPass").autocomplete = up ? "new-password" : "current-password";
   $("#authErr").textContent = "";
+  renderSocial(up);
   if (!authDlg.open) authDlg.showModal();
   (up ? $("#authName") : $("#authEmail")).focus();
 }
@@ -1177,6 +1178,43 @@ $("#authForm").addEventListener("submit", async e => {
     const next = afterAuth; afterAuth = null; next?.();
   } catch (x) { err.textContent = x.message; }
   finally { btn.disabled = false; }
+});
+
+/* ---------- sign in with Google, Facebook, X or LinkedIn ---------- */
+const SOCIAL = { google: "Google", facebook: "Facebook", x: "X", linkedin: "LinkedIn" };
+function renderSocial(signup) {
+  const list = (Api.capabilities?.oauth || []).filter(p => SOCIAL[p]);
+  $("#socialBox").hidden = !list.length;
+  $("#socialBtns").innerHTML = list.map(p => `<button type="button" class="btn" data-social="${p}">${signup ? "Sign up" : "Continue"} with ${SOCIAL[p]}</button>`).join("");
+}
+$("#socialBtns").addEventListener("click", e => {
+  const b = e.target.closest("[data-social]"); if (!b) return;
+  const done = new URL("oauth.html", location.href);
+  done.hash = "";
+  // Sign in in a pop-up so an unsaved search isn't lost; fall back to a full redirect if pop-ups are blocked.
+  const popupUrl = new URL(done); popupUrl.search = "?popup=1";
+  const w = window.open(Api.oauthStartUrl(b.dataset.social, popupUrl.href), "litview-oauth", "width=520,height=700");
+  if (w) { $("#authErr").textContent = ""; b.textContent = `Waiting for ${SOCIAL[b.dataset.social]}…`; return; }
+  try { sessionStorage.setItem("litview.returnTo", location.href); } catch { /* storage unavailable */ }
+  location.href = Api.oauthStartUrl(b.dataset.social, done.href);
+});
+const seenCodes = new Set();
+async function finishSocial(result) {
+  if (!result || (Date.now() - (result.at || 0)) > 5 * 60 * 1000) return;
+  if (result.error) { renderSocial(authMode === "signup"); $("#authErr").textContent = result.error; if (!authDlg.open) { openAuth("signin", afterAuth); $("#authErr").textContent = result.error; } return; }
+  if (!result.code || seenCodes.has(result.code)) return;
+  seenCodes.add(result.code);
+  try {
+    await Api.oauthExchange(result.code);
+    if (authDlg.open) authDlg.close();
+    toast(`Signed in as ${Api.user.name}`);
+    const next = afterAuth; afterAuth = null; next?.();
+  } catch (x) { if (!Api.signedIn) { openAuth("signin"); $("#authErr").textContent = x.message; } }
+}
+try { new BroadcastChannel("litview-auth").onmessage = e => finishSocial(e.data); } catch { /* older browsers use the storage event */ }
+addEventListener("storage", e => {
+  if (e.key !== "litview.oauthResult" || !e.newValue) return;
+  try { localStorage.removeItem("litview.oauthResult"); finishSocial(JSON.parse(e.newValue)); } catch { /* ignore */ }
 });
 
 function renderAccount() {
@@ -1269,6 +1307,10 @@ async function startCloud() {
   if (!Api.enabled) return;
   await Promise.all([Api.loadCapabilities(), Api.checkSession()]);
   applyCapabilities(); renderAccount();
+  try {
+    const pendingLogin = sessionStorage.getItem("litview.oauthResult");
+    if (pendingLogin) { sessionStorage.removeItem("litview.oauthResult"); sessionStorage.removeItem("litview.returnTo"); await finishSocial(JSON.parse(pendingLogin)); }
+  } catch { /* storage unavailable */ }
   const m = location.hash.match(/^#r-([0-9a-f-]{36})$/);
   if (m) { if (Api.signedIn) loadReview(m[1]); else openAuth("signin", () => loadReview(m[1])); }
 }

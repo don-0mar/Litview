@@ -23,7 +23,7 @@ Litview is a web app for running a systematic literature review (SLR). Describe 
 - **Report draft:** introduction, method, results with figures, limitations and APA references, exported as Markdown, BibTeX, RIS or CSV.
 - **AI-assisted synthesis:** drafts themes, a discussion, research gaps and a conclusion from the included studies' abstracts, citing only those studies.
 
-**Accounts:** sign in to save reviews and come back to them.
+**Accounts:** sign in with email, Google, Facebook, X or LinkedIn to save reviews and come back to them.
 
 ## Architecture
 
