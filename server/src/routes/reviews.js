@@ -26,6 +26,14 @@ const Record = z.object({
   lang: z.string().max(40).nullable().optional(),
   source: z.string().max(40),
   sample: z.boolean().optional(),
+  // The client's own documents
+  uploaded: z.boolean().optional(),
+  fullText: z.string().max(80000).optional(),
+  fileName: z.string().max(300).optional(),
+  docId: z.string().max(60).optional(),
+  pages: z.number().int().nullable().optional(),
+  noText: z.boolean().optional(),
+  edited: z.boolean().optional(),
 }).passthrough();
 
 const Source = z.object({
@@ -101,7 +109,8 @@ function recordIndex(sources) {
   for (const s of sources) for (const r of s.items) {
     for (const k of new Set([recordKey(r), "t:" + normTitle(r.title)])) {
       const prev = idx.get(k);
-      if (!prev || (!prev.abstract && r.abstract)) idx.set(k, r);
+      // Prefer the version with full text, then one with an abstract.
+      if (!prev || (!prev.fullText && r.fullText) || (!prev.fullText && !prev.abstract && r.abstract)) idx.set(k, r);
     }
   }
   return idx;

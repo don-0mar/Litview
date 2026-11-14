@@ -231,11 +231,13 @@ export async function enrichDois(dois, ctx) {
   const clean = [...new Set(dois.map(d => cleanDoi(d).toLowerCase()).filter(d => d && !/[|,]/.test(d)))].slice(0, 50);
   if (!clean.length) return {};
   const mail = ctx.config.contactEmail ? `&mailto=${encodeURIComponent(ctx.config.contactEmail)}` : "";
-  const j = await get(ctx.fetch, `https://api.openalex.org/works?filter=doi:${clean.map(d => encodeURIComponent("https://doi.org/" + d)).join("|")}&per-page=50&select=doi,abstract_inverted_index,cited_by_count,open_access${mail}`);
+  const j = await get(ctx.fetch, `https://api.openalex.org/works?filter=doi:${clean.map(d => encodeURIComponent("https://doi.org/" + d)).join("|")}&per-page=50&select=doi,title,publication_year,authorships,primary_location,abstract_inverted_index,cited_by_count,open_access${mail}`);
   const out = Object.fromEntries(clean.map(d => [d, null]));
   for (const w of j.results || []) {
     const d = cleanDoi(w.doi).toLowerCase();
-    out[d] = { abstract: invAbstract(w.abstract_inverted_index), cites: w.cited_by_count, oa: !!w.open_access?.is_oa };
+    out[d] = { abstract: invAbstract(w.abstract_inverted_index), cites: w.cited_by_count, oa: !!w.open_access?.is_oa,
+      title: w.title || "", year: w.publication_year || null, authors: (w.authorships || []).map(a => a.author?.display_name).filter(Boolean),
+      venue: w.primary_location?.source?.display_name || "" };
   }
   return out;
 }

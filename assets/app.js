@@ -4,7 +4,7 @@ const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const NOW = new Date().getFullYear();
-const DB_NAMES = {openalex:"OpenAlex", crossref:"Crossref", sciencedirect:"ScienceDirect", tandf:"Taylor & Francis", wiley:"Wiley", springer:"Springer", emerald:"Emerald", ieee:"IEEE Xplore", acm:"ACM Digital Library", europepmc:"Europe PMC", arxiv:"arXiv", scopus:"Scopus", proquest:"ProQuest", jstor:"JSTOR", ebsco:"EBSCOhost", sample:"Sample data"};
+const DB_NAMES = {openalex:"OpenAlex", crossref:"Crossref", sciencedirect:"ScienceDirect", tandf:"Taylor & Francis", wiley:"Wiley", springer:"Springer", emerald:"Emerald", ieee:"IEEE Xplore", acm:"ACM Digital Library", europepmc:"Europe PMC", arxiv:"arXiv", upload:"Your documents", scopus:"Scopus", proquest:"ProQuest", jstor:"JSTOR", ebsco:"EBSCOhost", sample:"Sample data"};
 // DOI prefixes each publisher registers with Crossref
 const PUBLISHERS = {sciencedirect:["10.1016"], tandf:["10.1080","10.4324"], wiley:["10.1002","10.1111"], springer:["10.1007","10.1057"], emerald:["10.1108"], ieee:["10.1109"], acm:["10.1145"]};
 const Api = window.LitviewApi;
@@ -17,6 +17,7 @@ const TYPE_LABEL = t => ({"book": "Book", "monograph": "Book", "edited-book": "B
 const isBook = t => /^(book|monograph|edited-book|reference-book)$/.test(t);
 const REASONS = ["Off topic","Wrong study type","Wrong population","Wrong outcome","Not peer reviewed","Full text unavailable","Other"];
 
+const pendingDocs = [];   // the client's own files, chosen on the search box
 const state = { opts:null, records:[], raw:{}, identified:{}, dupes:0, view:"all", filter:"", shown:40, sample:false, decisions:{}, enriched:{}, imported:{},
   totals:{}, urls:{}, reviewId:null, review:null, role:null, team:null, synthesis:null };
 
@@ -55,6 +56,7 @@ function readOpts() {
     title: $("#reviewTitle").value.trim(),
     rqs: $("#rqs").value.split("\n").map(s => s.trim()).filter(Boolean),
     custom: $("#customString").value.trim(),
+    docsOnly: pendingDocs.length > 0 && ($("input[name=docmode]:checked")?.value || "only") === "only",
   };
 }
 function applyOpts(o) {
@@ -70,13 +72,67 @@ function applyOpts(o) {
 }
 function renderChips() {
   const o = readOpts();
+  const nd = pendingDocs.length, docChip = `${nd} document${nd === 1 ? "" : "s"}`;
+  $("#runBtn").textContent = o.docsOnly ? "Build review" : "Run search";
+  if (o.docsOnly) { $("#chips").innerHTML = [docChip, "Your documents only"].map(x => `<span class="chip">${esc(x)}</span>`).join(""); return; }
   const c = [`${o.yFrom}–${o.yTo}`, o.dbs.length > 3 ? `${o.dbs.length} databases` : o.dbs.map(d => DB_NAMES[d]).join(", ") || "No database selected", `${o.perDb} per database`];
+  if (nd) c.unshift(docChip);
   if (o.oa) c.push("Open access");
   if (o.minCites) c.push(`${o.minCites}+ citations`);
   if (o.exc.length) c.push(`Excluding ${o.exc.length} term${o.exc.length > 1 ? "s" : ""}`);
   $("#chips").innerHTML = c.map(x => `<span class="chip">${esc(x)}</span>`).join("");
 }
 renderChips();
+
+/* ---------- the client's own documents ---------- */
+const Docs = window.LitviewDocs;
+const parsedDocs = new Map();         // file signature -> promise of its record, so a re-run doesn't read twice
+const sig = f => `${f.name}|${f.size}|${f.lastModified}`;
+function addPendingDocs(files) {
+  const all = [...files], ok = all.filter(f => Docs.supported(f));
+  for (const f of ok) if (!pendingDocs.some(p => sig(p) === sig(f))) pendingDocs.push(f);
+  if (all.length > ok.length) toast(`${all.length - ok.length} file${all.length - ok.length > 1 ? "s" : ""} skipped: only PDF and plain-text files can be read.`);
+  renderDocs(); renderChips();
+}
+function renderDocs() {
+  const box = $("#docs");
+  box.hidden = !pendingDocs.length;
+  if (!pendingDocs.length) { box.innerHTML = ""; return; }
+  const mode = $("input[name=docmode]:checked")?.value || "only";
+  box.innerHTML = `<div class="doclist">${pendingDocs.map((f, i) => `<span class="docchip"><span title="${esc(f.name)}">${esc(f.name)}</span><button type="button" data-rmdoc="${i}" aria-label="Remove ${esc(f.name)}">×</button></span>`).join("")}</div>
+    <div class="mode" role="radiogroup" aria-label="What the review is based on">
+      <label><input type="radio" name="docmode" value="only" ${mode === "only" ? "checked" : ""}>Base the review on these documents only</label>
+      <label><input type="radio" name="docmode" value="both" ${mode === "both" ? "checked" : ""}>Search databases too</label>
+    </div>
+    <p class="hint">Files are read in your browser. Only the extracted text is kept, and only if you save the review.</p>`;
+}
+$("#docInput").addEventListener("change", e => { addPendingDocs(e.target.files); e.target.value = ""; });
+$("#docs").addEventListener("click", e => {
+  const b = e.target.closest("[data-rmdoc]"); if (!b) return;
+  pendingDocs.splice(+b.dataset.rmdoc, 1); renderDocs(); renderChips();
+});
+{
+  const qf = $("#queryForm");
+  qf.addEventListener("dragover", e => { if ([...e.dataTransfer.types].includes("Files")) { e.preventDefault(); qf.classList.add("dragging"); } });
+  qf.addEventListener("dragleave", e => { if (!qf.contains(e.relatedTarget)) qf.classList.remove("dragging"); });
+  qf.addEventListener("drop", e => { if (!e.dataTransfer.files.length) return; e.preventDefault(); qf.classList.remove("dragging"); addPendingDocs(e.dataTransfer.files); });
+}
+/** Read files into records, one at a time. Returns { records, errors }. */
+async function readDocs(files, onProgress) {
+  const records = [], errors = [];
+  let done = 0;
+  for (const f of files) {
+    const k = sig(f);
+    if (!parsedDocs.has(k)) parsedDocs.set(k, Docs.read(f));
+    try { records.push({ ...(await parsedDocs.get(k)) }); }
+    catch (e) {
+      parsedDocs.delete(k); errors.push(e.message);
+      if (/PDF reader/.test(e.message)) break; // the reader itself didn't load: no point trying the rest
+    }
+    onProgress?.(++done, files.length);
+  }
+  return { records, errors };
+}
 
 /* ---------- search string ---------- */
 const STOP = new Set("a an the of in on for to and or with without by from at as is are was were be been being this that these those its it their into using use via vs versus among between within about over under how what which who whom why when where do does did can could should would may might study studies research review systematic literature effect effects impact role analysis based toward towards new also than then such more most other some any not no our we they i you he she them his her has have had".split(" "));
@@ -203,7 +259,7 @@ for (const [k, pre] of Object.entries(PUBLISHERS)) FETCHERS[k] = o => fromCrossr
 
 /* fill in missing abstracts, citation counts and open-access status from OpenAlex, 50 DOIs per request */
 async function enrich(records, onProgress) {
-  const need = [...new Set(records.filter(r => !r.sample && r.doi && (!r.abstract || r.noCites || (state.opts?.oa && r.oaKnown === false)) && !(r.doi.toLowerCase() in state.enriched) && !/[|,]/.test(r.doi)).map(r => r.doi.toLowerCase()))];
+  const need = [...new Set(records.filter(r => !r.sample && r.doi && (r.uploaded || !r.abstract || r.noCites || (state.opts?.oa && r.oaKnown === false)) && !(r.doi.toLowerCase() in state.enriched) && !/[|,]/.test(r.doi)).map(r => r.doi.toLowerCase()))];
   let added = 0;
   for (let i = 0; i < need.length; i += 50) {
     const batch = need.slice(i, i + 50);
@@ -213,11 +269,12 @@ async function enrich(records, onProgress) {
         const { results } = await Api.enrich(batch);
         for (const [d, v] of Object.entries(results)) { if (v) { state.enriched[d] = v; if (v.abstract) added++; } }
       } else {
-        const j = await getJSON(`https://api.openalex.org/works?filter=doi:${batch.map(d => encodeURIComponent("https://doi.org/" + d)).join("|")}&per-page=50&select=doi,abstract_inverted_index,cited_by_count,open_access`);
+        const j = await getJSON(`https://api.openalex.org/works?filter=doi:${batch.map(d => encodeURIComponent("https://doi.org/" + d)).join("|")}&per-page=50&select=doi,title,publication_year,authorships,primary_location,abstract_inverted_index,cited_by_count,open_access`);
         for (const w of j.results) {
           const d = (w.doi || "").replace("https://doi.org/", "").toLowerCase();
           const abs = invAbstract(w.abstract_inverted_index);
-          state.enriched[d] = {abstract: abs, cites: w.cited_by_count, oa: !!w.open_access?.is_oa};
+          state.enriched[d] = {abstract: abs, cites: w.cited_by_count, oa: !!w.open_access?.is_oa, title: w.title, year: w.publication_year,
+            authors: (w.authorships || []).map(a => a.author?.display_name).filter(Boolean), venue: w.primary_location?.source?.display_name || ""};
           if (abs) added++;
         }
       }
@@ -255,9 +312,18 @@ const IMPORT_INFO = {
 };
 function renderImports() {
   const o = state.opts;
-  const dbs = o.dbs.filter(d => isImport(d));
-  if (!dbs.length) { $("#importWrap").innerHTML = ""; return; }
-  $("#importWrap").innerHTML = `<h3>Add results from databases that need your login</h3>
+  const dbs = o.docsOnly ? [] : o.dbs.filter(d => isImport(d));
+  const nd = (state.raw.upload || []).length;
+  const docsCard = `<h3>Your documents</h3>
+    <div class="imp">
+      <p class="hint" style="margin:0 0 10px">Add PDFs or text files of studies you already have. Litview reads the title, authors, year, DOI, abstract and full text, and checks the details against OpenAlex when it finds a DOI. Files are read in your browser.</p>
+      <div class="acts">
+        <label class="btn small primary filebtn">Add documents<input type="file" accept="${Docs.ACCEPT}" multiple data-docs aria-label="Add your own documents"></label>
+        ${nd ? `<span class="done">${nd} document${nd > 1 ? "s" : ""} in this review</span>` : ""}
+      </div>
+    </div>`;
+  if (!dbs.length) { $("#importWrap").innerHTML = docsCard; return; }
+  $("#importWrap").innerHTML = docsCard + `<h3>Add results from databases that need your login</h3>
     <p class="sub" style="margin-bottom:6px">Run each search string in its database, export the results, and import the file here. Imported records join the same duplicate check, screening and flow diagram. RIS, BibTeX and CSV files work.</p>
     <div class="imports">${dbs.map(d => {
       const n = state.imported[d];
@@ -279,6 +345,23 @@ $("#importWrap").addEventListener("click", async e => {
   catch { toast("Copying is blocked here. Select the text and copy it instead."); }
 });
 $("#importWrap").addEventListener("change", async e => {
+  const di = e.target.closest("[data-docs]");
+  if (di) {
+    const files = [...di.files].filter(f => Docs.supported(f)); di.value = "";
+    if (!files.length) { toast("Only PDF and plain-text files can be read."); return; }
+    toast(`Reading ${files.length} document${files.length > 1 ? "s" : ""}…`);
+    const { records, errors } = await readDocs(files);
+    const have = state.raw.upload || [];
+    const fresh = records.filter(x => !have.some(h => h.fileName === x.fileName && h.title === x.title));
+    if (fresh.length) {
+      state.raw.upload = [...have, ...fresh]; state.totals.upload = state.raw.upload.length;
+      if (!state.sample) await enrich(fresh);
+      rebuild(); renderAll();
+      if (state.reviewId) Api.putSource(state.reviewId, "upload", sourcePayload("upload")).catch(x => toast(`Not saved: ${x.message}`));
+    }
+    toast(errors.length ? `${fresh.length} added. ${errors.length} couldn't be read: ${errors[0]}` : `${fresh.length} document${fresh.length === 1 ? "" : "s"} added`);
+    return;
+  }
   const inp = e.target.closest("[data-import]"); if (!inp || !inp.files.length) return;
   const db = inp.dataset.import;
   let items = [];
@@ -418,8 +501,9 @@ function sampleRecords(o) {
 const normTitle = t => (t || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 function dedupe(items) {
   const seen = new Map(); let d = 0;
-  for (const r of items) {
-    if (!r.title) continue;
+  for (const raw of items) {
+    if (!raw.title) continue;
+    const r = withEnrichment(raw);
     const k = r.doi ? "doi:" + r.doi.toLowerCase() : "t:" + normTitle(r.title);
     const k2 = "t:" + normTitle(r.title);
     const hit = seen.get(k) || seen.get(k2);
@@ -428,16 +512,38 @@ function dedupe(items) {
       if (hit.noCites && !r.noCites) { hit.cites = r.cites; hit.noCites = false; } else if (!r.noCites) hit.cites = Math.max(hit.cites, r.cites);
       hit.oa = hit.oa || r.oa; hit.oaKnown = hit.oaKnown !== false || r.oaKnown !== false;
       if (!hit.abstract && r.abstract) hit.abstract = r.abstract; if (!hit.doi && r.doi) hit.doi = r.doi;
+      if (!hit.fullText && r.fullText) Object.assign(hit, { fullText: r.fullText, uploaded: true, fileName: r.fileName, docId: r.docId, pages: r.pages });
       hit.foundIn.add(r.source); continue;
     }
     const rec = {...r, foundIn: new Set([r.source])};
-    const e = rec.doi && state.enriched[rec.doi.toLowerCase()];
-    if (e) { if (!rec.abstract && e.abstract) rec.abstract = e.abstract; if (rec.noCites || rec.oaKnown === false) { rec.cites = Math.max(rec.cites, e.cites || 0); rec.noCites = false; } if (rec.oaKnown === false) { rec.oa = e.oa; rec.oaKnown = true; } }
     seen.set(k, rec); seen.set(k2, rec);
   }
   return { unique: [...new Set(seen.values())], dupes: d };
 }
+function withEnrichment(raw) {
+  const e = raw.doi && state.enriched[raw.doi.toLowerCase()];
+  if (!e) return raw;
+  const r = {...raw};
+  if (!r.abstract && e.abstract) r.abstract = e.abstract;
+  if (r.noCites || r.oaKnown === false) { r.cites = Math.max(r.cites || 0, e.cites || 0); r.noCites = false; }
+  if (r.oaKnown === false) { r.oa = e.oa; r.oaKnown = true; }
+  // A document's own PDF is a weaker source of its title, authors and year than the DOI record, unless the client edited them.
+  if (r.uploaded && !r.edited && e.title) {
+    r.title = e.title; if (e.year) r.year = e.year; if (e.authors?.length) r.authors = e.authors; if (e.venue) r.venue = e.venue;
+    if (e.abstract && (r.abstract || "").length < 200) r.abstract = e.abstract;
+    r.checked = true;
+  }
+  return r;
+}
 function autoScreen(r, o) {
+  if (r.uploaded) {
+    // The client chose these documents, so search filters (years, citations, language) don't apply; their own terms do.
+    const text = (r.title + " " + r.abstract + " " + (r.fullText || "").slice(0, 20000)).toLowerCase();
+    if (o.caseStudy && !/case[\s-]+stud(y|ies)/.test(text)) return "Not a case study";
+    const ex = o.exc.find(t => text.includes(t)); if (ex) return `Mentions “${ex}”`;
+    if (o.inc.length && !o.inc.some(t => text.includes(t))) return "Missing required terms";
+    return null;
+  }
   const text = (r.title + " " + r.abstract).toLowerCase();
   if (r.year && (r.year < o.yFrom || r.year > o.yTo)) return "Outside year range";
   if (o.needAbstract && !r.abstract) return "No abstract";
@@ -455,7 +561,7 @@ const recKey = r => r.doi ? "doi:" + r.doi.toLowerCase() : "t:" + normTitle(r.ti
 function rebuild() {
   const o = state.opts;
   // Merge sources in a fixed order so every reviewer sees the records in the same order.
-  const rank = d => { const i = [...OPEN_DBS, ...LOGIN_DBS].indexOf(d); return i < 0 ? 99 : i; };
+  const rank = d => { if (d === "upload") return -1; const i = [...OPEN_DBS, ...LOGIN_DBS].indexOf(d); return i < 0 ? 99 : i; };
   const order = Object.keys(state.raw).sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
   const all = order.flatMap(k => state.raw[k]);
   state.identified = Object.fromEntries(order.map(k => [k, state.raw[k].length]));
@@ -497,10 +603,11 @@ const searchSource = (d, o) => Api.enabled ? Api.search(d, searchBody(o)) : FETC
 async function run(o, forceSample = false) {
   detachReview();
   state.opts = o; state.sample = forceSample; state.raw = {}; state.decisions = {}; state.imported = {}; state.totals = {};
-  const live = o.dbs.filter(d => isLive(d));
-  const hasImports = o.dbs.some(d => isImport(d));
+  const docs = forceSample ? [] : pendingDocs.slice();
+  const live = o.docsOnly ? [] : o.dbs.filter(d => isLive(d));
+  const hasImports = !o.docsOnly && o.dbs.some(d => isImport(d));
   const st = $("#status");
-  const lines = Object.fromEntries((forceSample ? ["sample"] : live).map(d => [d, {cls: "busy", msg: "Searching…"}]));
+  const lines = Object.fromEntries((forceSample ? ["sample"] : [...(docs.length ? ["upload"] : []), ...live]).map(d => [d, {cls: "busy", msg: d === "upload" ? `Reading 0 of ${docs.length}…` : "Searching…"}]));
   const draw = () => st.innerHTML = Object.entries(lines).map(([d, l]) => `<div class="line"><span class="dot ${l.cls}"></span><strong>${esc(DB_NAMES[d] || d)}</strong><span>${esc(l.msg)}</span></div>`).join("");
   draw();
   $("#runBtn").disabled = true;
@@ -509,6 +616,15 @@ async function run(o, forceSample = false) {
     for (const r of sampleRecords(o)) (state.raw[r.source] = state.raw[r.source] || []).push(r);
     lines.sample = {cls: "ok", msg: `${Object.values(state.raw).flat().length} illustrative records generated`}; draw();
   } else {
+    let docErrors = [];
+    if (docs.length) {
+      const { records, errors } = await readDocs(docs, (n, of) => { lines.upload.msg = `Reading ${n} of ${of}…`; draw(); });
+      docErrors = errors;
+      if (records.length) { state.raw.upload = records; state.totals.upload = records.length; }
+      const scanned = records.filter(x => x.noText).length;
+      lines.upload = { cls: records.length ? "ok" : "err", msg: `${records.length} of ${docs.length} read${errors.length ? `. ${errors.length} couldn't be read` : ""}${scanned ? `. ${scanned} had no text (scanned?)` : ""}` };
+      draw();
+    }
     await Promise.all(live.map(async d => {
       try {
         const res = await searchSource(d, o);
@@ -520,15 +636,21 @@ async function run(o, forceSample = false) {
       draw();
     }));
     const all = Object.values(state.raw).flat();
-    if (all.some(r => !r.abstract && r.doi)) {
-      lines.enrich = {cls: "busy", msg: "Looking up missing abstracts in OpenAlex…"}; DB_NAMES.enrich = "Abstract lookup"; draw();
-      const added = await enrich(all, (a, done, total) => { lines.enrich.msg = `Looking up missing abstracts in OpenAlex… ${done} of ${total}`; draw(); });
-      lines.enrich = {cls: "ok", msg: `${added} missing abstract${added === 1 ? "" : "s"} filled in`}; draw();
+    if (all.some(r => r.doi && (r.uploaded || !r.abstract))) {
+      lines.enrich = {cls: "busy", msg: "Looking up details by DOI in OpenAlex…"}; DB_NAMES.enrich = "DOI lookup"; draw();
+      const added = await enrich(all, (a, done, total) => { lines.enrich.msg = `Looking up details by DOI in OpenAlex… ${done} of ${total}`; draw(); });
+      const matched = (state.raw.upload || []).filter(x => x.doi && state.enriched[x.doi.toLowerCase()]?.title).length;
+      lines.enrich = {cls: "ok", msg: [added ? `${added} missing abstract${added === 1 ? "" : "s"} filled in` : "", matched ? `${matched} of your documents matched by DOI` : ""].filter(Boolean).join(". ") || "Nothing to add"}; draw();
     }
+    if (docErrors.length) st.insertAdjacentHTML("beforeend", `<div class="notice"><p><strong>Some documents couldn't be read.</strong></p><ul>${docErrors.map(x => `<li>${esc(x)}</li>`).join("")}</ul></div>`);
   }
   $("#runBtn").disabled = false;
 
   const total = Object.values(state.raw).flat().length;
+  if (!total && o.docsOnly) {
+    st.insertAdjacentHTML("beforeend", `<div class="notice"><p><strong>None of your documents could be read.</strong> Check that they are PDFs with selectable text, or plain-text files, and try again.</p></div>`);
+    return;
+  }
   if (!total && !(hasImports && !live.length)) {
     const blocked = live.length && live.every(d => lines[d].cls === "err");
     st.insertAdjacentHTML("beforeend", blocked
@@ -547,8 +669,8 @@ async function run(o, forceSample = false) {
 $("#queryForm").addEventListener("submit", e => {
   e.preventDefault();
   const o = readOpts();
-  if (!o.topic) { topic.focus(); toast("Describe your research topic first"); return; }
-  if (!o.dbs.length) { toast("Select at least one database"); $("#refine").classList.contains("open") || refineBtn.click(); return; }
+  if (!o.topic) { topic.focus(); toast(pendingDocs.length ? "Describe what your documents are about first" : "Describe your research topic first"); return; }
+  if (!o.docsOnly && !o.dbs.length) { toast("Select at least one database"); $("#refine").classList.contains("open") || refineBtn.click(); return; }
   if ($("#refine").classList.contains("open")) refineBtn.click();
   run(o);
 });
@@ -584,11 +706,14 @@ function renderProtocol() {
   const typeNames = {article: "Journal articles", conference: "Conference papers", review: "Reviews", preprint: "Preprints", book: "Books", chapter: "Book chapters", case: "Case studies"};
   const rows = [
     ["Topic", esc(o.topic)],
-    ["Databases", (state.sample ? ["Sample data"] : o.dbs.map(d => DB_NAMES[d] + (isImport(d) ? (state.imported[d] != null ? " (imported)" : " (awaiting import)") : ""))).join(", ")],
-    ["Years", `${o.yFrom}–${o.yTo}`],
-    ["Study types", o.types.map(t => typeNames[t]).join(", ") || "Any"],
-    ["Language", o.english ? "English" : "Any"],
-    ["Other criteria", [o.oa && "Open access only", o.needAbstract && "Abstract available", o.minCites && `${o.minCites}+ citations`].filter(Boolean).join("; ") || "None"],
+    ["Databases", state.sample ? "Sample data" : o.docsOnly ? "None. The review is based on your documents" : o.dbs.map(d => DB_NAMES[d] + (isImport(d) ? (state.imported[d] != null ? " (imported)" : " (awaiting import)") : "")).join(", ")],
+    ...((state.raw.upload || []).length ? [["Your documents", `${state.raw.upload.length} uploaded`]] : []),
+    ...(o.docsOnly ? [] : [["Years", `${o.yFrom}–${o.yTo}`]]),
+    ...(o.docsOnly ? [] : [
+      ["Study types", o.types.map(t => typeNames[t]).join(", ") || "Any"],
+      ["Language", o.english ? "English" : "Any"],
+      ["Other criteria", [o.oa && "Open access only", o.needAbstract && "Abstract available", o.minCites && `${o.minCites}+ citations`].filter(Boolean).join("; ") || "None"],
+    ]),
     ["Inclusion terms", esc(o.inc.join(", ")) || "None"],
     ["Exclusion terms", esc(o.exc.join(", ")) || "None"],
     ["Searched on", new Date().toLocaleDateString(undefined, {day: "numeric", month: "long", year: "numeric"})],
@@ -660,12 +785,15 @@ function recHTML(r) {
       ${r.abstract ? `<p class="abs clamp">${esc(r.abstract)}</p>` : ""}
       <div class="tags">
         <span class="tag">${TYPE_LABEL(r.type)}</span>
-        ${[...r.foundIn].map(s => `<span class="tag">${DB_NAMES[s]}</span>`).join("")}
+        ${[...r.foundIn].filter(s => !(s === "upload" && r.uploaded)).map(s => `<span class="tag">${DB_NAMES[s]}</span>`).join("")}
+        ${r.uploaded ? `<span class="tag mine" title="${esc(r.fileName || "")}">Your document${r.pages ? `, ${r.pages} page${r.pages === 1 ? "" : "s"}` : ""}</span>` : ""}
+        ${r.noText ? `<span class="tag reason">No text found. Scanned PDF?</span>` : ""}
         ${r.oa ? `<span class="tag oa">Open access</span>` : ""}
         ${r.sample ? `<span class="tag sample">Sample record</span>` : ""}
         ${r.status === "excluded" && r.reason ? `<span class="tag reason">${esc(r.reason)}</span>` : ""}
         ${teamTags(r)}
         ${r.abstract && r.abstract.length > 260 ? `<button type="button" class="btn ghost small" data-act="expand">Show full abstract</button>` : ""}
+        ${r.uploaded && r.docId ? `<button type="button" class="btn ghost small" data-act="editdoc">Edit details</button>` : ""}
       </div>
     </div>
     ${decideHTML(r)}
@@ -710,6 +838,34 @@ function teamTags(r) {
   if (!r.mine && !r.auto && !r.conflict) out.push(`<span class="tag pending">Not screened by you yet</span>`);
   return out.join("");
 }
+/* ---------- editing an uploaded document's details ---------- */
+function openDocEditor(li, r) {
+  if (li.querySelector(".editdoc")) return;
+  li.querySelector(".tags").insertAdjacentHTML("afterend", `<div class="editdoc">
+    <label class="wide">Title<input data-f="title" value="${esc(r.title)}"></label>
+    <label class="wide">Authors, separated by semicolons<input data-f="authors" value="${esc(r.authors.join("; "))}"></label>
+    <label>Year<input data-f="year" inputmode="numeric" value="${esc(r.year || "")}"></label>
+    <label>DOI<input data-f="doi" value="${esc(r.doi || "")}"></label>
+    <label class="wide">Journal or publisher<input data-f="venue" value="${esc(r.venue || "")}"></label>
+    <div class="acts"><button type="button" class="btn small primary" data-act="savedoc">Save details</button><button type="button" class="btn small ghost" data-act="canceldoc">Cancel</button></div>
+  </div>`);
+  li.querySelector(".editdoc input").focus();
+}
+function saveDocEdits(li, r) {
+  const v = Object.fromEntries([...li.querySelectorAll(".editdoc [data-f]")].map(i => [i.dataset.f, i.value.trim()]));
+  if (!v.title) { toast("A document needs a title"); return; }
+  const year = +v.year;
+  const raw = (state.raw.upload || []).find(x => x.docId === r.docId);
+  if (!raw) return;
+  Object.assign(raw, { title: v.title, authors: v.authors.split(/\s*;\s*/).filter(Boolean), year: year >= 1800 && year <= NOW + 1 ? year : null,
+    doi: v.doi.replace(/^https?:\/\/(dx\.)?doi\.org\//i, ""), venue: v.venue, edited: true });
+  // Keep the screening decision when the record's key changes.
+  const oldKey = r.key, newKey = recKey(raw);
+  if (oldKey !== newKey && state.decisions[oldKey]) { state.decisions[newKey] = state.decisions[oldKey]; delete state.decisions[oldKey]; queueDecision(newKey); }
+  rebuild(); renderRecs(); refreshCounts(); renderImports();
+  if (state.reviewId) Api.putSource(state.reviewId, "upload", sourcePayload("upload")).catch(x => toast(`Not saved: ${x.message}`));
+  toast("Details saved");
+}
 function renderRecs() {
   renderCountsOnly();
   const v = visibleRecs();
@@ -720,6 +876,9 @@ function renderRecs() {
 $("#recs").addEventListener("click", e => {
   const b = e.target.closest("[data-act]"); if (!b || b.tagName === "SELECT") return;
   const li = b.closest(".rec"); const r = state.records.find(x => x.id === +li.dataset.id);
+  if (b.dataset.act === "editdoc") return openDocEditor(li, r);
+  if (b.dataset.act === "canceldoc") { li.outerHTML = recHTML(r); return; }
+  if (b.dataset.act === "savedoc") return saveDocEdits(li, r);
   if (b.dataset.act === "expand") { const p = li.querySelector(".abs"); const c = p.classList.toggle("clamp"); b.textContent = c ? "Show full abstract" : "Show less"; return; }
   if (b.dataset.act === "resolve-inc" || b.dataset.act === "resolve-exc") return resolveConflict(r, b.dataset.act === "resolve-inc" ? "included" : "excluded");
   const current = teamMode() ? r.mine?.status : r.status;
@@ -762,7 +921,11 @@ function terms(recs, o) {
   return list.slice(0, 12);
 }
 function barsHTML(list, max) { return list.map(([k, n]) => `<li><span class="name" title="${esc(k)}">${esc(k)}</span><span class="track"><span class="fill" style="width:${(n / max * 100).toFixed(1)}%"></span></span><span class="n">${n}</span></li>`).join(""); }
-function yearData(inc, o) { const m = {}; for (let y = o.yFrom; y <= o.yTo; y++) m[y] = 0; inc.forEach(r => { if (r.year in m) m[r.year]++; }); return Object.entries(m); }
+function yearData(inc, o) {
+  const ys = inc.map(r => r.year).filter(y => y >= 1900 && y <= NOW + 1);
+  let lo = o.docsOnly && ys.length ? Math.min(...ys) : Math.min(o.yFrom, ...ys), hi = o.docsOnly && ys.length ? Math.max(...ys) : Math.max(o.yTo, ...ys);
+  lo = Math.max(lo, hi - 60);
+  const m = {}; for (let y = lo; y <= hi; y++) m[y] = 0; inc.forEach(r => { if (r.year in m) m[r.year]++; }); return Object.entries(m); }
 function yearSVG(data) {
   const W = 520, H = 200, pl = 30, pb = 26, pt = 10;
   const max = Math.max(1, ...data.map(d => d[1]));
@@ -801,7 +964,8 @@ function cap1(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
 function list(arr) { return arr.length < 2 ? arr.join("") : arr.slice(0, -1).join(", ") + " and " + arr[arr.length - 1]; }
 function buildReport() {
   const o = state.opts, c = counts(), inc = [...c.inc].sort((a, b) => b.cites - a.cites);
-  const usedDbs = state.sample ? [] : o.dbs.filter(d => !isImport(d) || state.imported[d] != null);
+  const usedDbs = state.sample || o.docsOnly ? [] : o.dbs.filter(d => !isImport(d) || state.imported[d] != null);
+  const nDocs = (state.raw.upload || []).length, docsOnly = !!o.docsOnly && !state.sample;
   const dbs = state.sample ? ["sample data"] : usedDbs.map(d => DB_NAMES[d]);
   const apiDbs = usedDbs.filter(d => ["openalex", "crossref", "europepmc", "arxiv"].includes(d)).map(d => DB_NAMES[d]);
   const pubDbs = usedDbs.filter(d => d in PUBLISHERS).map(d => DB_NAMES[d]);
@@ -817,13 +981,16 @@ function buildReport() {
   S.push(["h1", title]);
   if (state.sample) S.push(["todo", "This draft was built from sample records. Run the search on a hosted copy of Litview to produce a real review."]);
   S.push(["h2", "1. Introduction"]);
-  S.push(["p", `This review systematically identifies and synthesises published research on ${o.topic.replace(/[.?!]+$/, "")}, covering work published between ${o.yFrom} and ${o.yTo}.`]);
+  S.push(["p", docsOnly
+    ? `This review synthesises ${inc.length} stud${inc.length === 1 ? "y" : "ies"} on ${o.topic.replace(/[.?!]+$/, "")}, selected by the review team.`
+    : `This review systematically identifies and synthesises published research on ${o.topic.replace(/[.?!]+$/, "")}, covering work published between ${o.yFrom} and ${o.yTo}.`]);
   S.push(["todo", "Add the background: why this topic matters, what earlier reviews have found, and the gap this review fills."]);
   if (o.rqs.length) { S.push(["p", "The review addresses the following research questions:"]); S.push(["ul", o.rqs]); }
   else S.push(["todo", "State your research questions (RQ1, RQ2…). You can add them under Refine search and the draft will update."]);
   S.push(["h2", "2. Method"]);
   S.push(["p", `The review follows the PRISMA 2020 statement for reporting systematic reviews (Page et al., 2021).`]);
-  S.push(["h3", "2.1 Search strategy"]);
+  S.push(["h3", docsOnly ? "2.1 Sources" : "2.1 Search strategy"]);
+  if (docsOnly) S.push(["p", `The review is based on ${nDocs} document${nDocs === 1 ? "" : "s"} supplied by the review team rather than a database search. Bibliographic details were read from each document and, where a DOI was found, checked against OpenAlex.`]);
   const when = new Date().toLocaleDateString(undefined, {day: "numeric", month: "long", year: "numeric"});
   const order = {relevance: "relevance", cited: "citation count", newest: "publication date"}[o.sort];
   if (state.sample) S.push(["p", `Sample data was searched on ${when} using the search string ${qString(o)}.`]);
@@ -832,16 +999,19 @@ function buildReport() {
     if (apiDbs.length) parts.push(`${list(apiDbs)} ${apiDbs.length > 1 ? "were" : "was"} searched through ${apiDbs.length > 1 ? "their public APIs" : "its public API"}`);
     if (pubDbs.length) parts.push(`the ${list(pubDbs)} collection${pubDbs.length > 1 ? "s were" : " was"} searched through the metadata ${pubDbs.length > 1 ? "these publishers register" : "the publisher registers"} with Crossref, filtered by DOI prefix`);
     if (parts.length) S.push(["p", `${cap1(list(parts))} on ${when}, using the search string ${qString(o)}. Up to ${o.perDb} records were retrieved from each source, ordered by ${order}.${pubDbs.length ? " Missing abstracts were retrieved from OpenAlex by DOI." : ""}`]);
+    if (nDocs && !docsOnly) S.push(["p", `In addition, ${nDocs} document${nDocs === 1 ? " was" : "s were"} supplied by the review team and screened alongside the search results.`]);
     if (impDbs.length) {
       S.push(["p", `${cap1(list(impDbs.map(d => DB_NAMES[d])))} ${impDbs.length > 1 ? "were" : "was"} searched through ${impDbs.length > 1 ? "their own interfaces" : "its own interface"} with the following database-specific search strings, limited to ${o.yFrom}–${o.yTo}. The results were exported and imported for screening.`]);
       S.push(["ul", impDbs.map(d => `${DB_NAMES[d]}: ${importString(d, o)} (${state.imported[d]} records)`)]);
     }
   }
   S.push(["h3", "2.2 Eligibility criteria"]);
-  const incl = [`Published between ${o.yFrom} and ${o.yTo}`, `Document type: ${o.docTypes.map(x => typeNames[x]).join(", ") || "any"}`];
+  const incl = docsOnly ? ["Addresses the review topic"] : [`Published between ${o.yFrom} and ${o.yTo}`, `Document type: ${o.docTypes.map(x => typeNames[x]).join(", ") || "any"}`];
   if (o.caseStudy) incl.push("Study design: case study, as stated in the title or abstract");
-  if (o.english) incl.push("Written in English"); if (o.needAbstract) incl.push("Abstract available");
-  if (o.oa) incl.push("Available open access"); if (o.minCites) incl.push(`Cited at least ${o.minCites} times`);
+  if (!docsOnly) {
+    if (o.english) incl.push("Written in English"); if (o.needAbstract) incl.push("Abstract available");
+    if (o.oa) incl.push("Available open access"); if (o.minCites) incl.push(`Cited at least ${o.minCites} times`);
+  }
   if (o.inc.length) incl.push(`Title or abstract mentions ${list(o.inc.map(x => `“${x}”`))}`);
   S.push(["p", "Studies were included if they met all of the following criteria:"]); S.push(["ul", incl]);
   S.push(["p", o.exc.length ? `Studies were excluded if the title or abstract mentioned ${list(o.exc.map(x => `“${x}”`))}, or if on reading they did not address the topic.` : "Studies were excluded if on reading the title and abstract they did not address the topic."]);
@@ -855,11 +1025,12 @@ function buildReport() {
   }
   if (state.synthesis) {
     S.push(["h3", "2.4 Synthesis"]);
-    S.push(["p", `A first draft of the thematic synthesis was produced with an AI model (${state.synthesis.model}) from the titles and abstracts of the included studies, then checked against the full texts by the review team.`]);
+    const ft = state.synthesis.fullTextCount || 0;
+    S.push(["p", `A first draft of the thematic synthesis was produced with an AI model (${state.synthesis.model}) from ${ft ? `the full texts of ${ft} included document${ft === 1 ? "" : "s"}${state.synthesis.basedOn > ft ? " and the titles and abstracts of the other included studies" : ""}` : "the titles and abstracts of the included studies"}, then checked against the full texts by the review team.`]);
   }
   S.push(["h2", "3. Results"]);
   S.push(["h3", "3.1 Study selection"]);
-  S.push(["p", `The search identified ${c.identified} records. After removing ${c.dupes} duplicates, ${c.screened} records were screened. ${c.autoEx} were excluded for not meeting the eligibility criteria and ${c.manEx} were excluded after reading the title and abstract, leaving ${c.included} studies in the review (Figure 1).`]);
+  S.push(["p", `${docsOnly ? `The review team supplied ${c.identified} documents` : `The search identified ${c.identified} records`}. After removing ${c.dupes} duplicate${c.dupes === 1 ? "" : "s"}, ${c.screened} record${c.screened === 1 ? " was" : "s were"} screened. ${c.autoEx} ${c.autoEx === 1 ? "was" : "were"} excluded for not meeting the eligibility criteria and ${c.manEx} ${c.manEx === 1 ? "was" : "were"} excluded after reading ${docsOnly ? "the document" : "the title and abstract"}, leaving ${c.included} studies in the review (Figure 1).`]);
   S.push(["figure", "prisma"]);
   if (inc.length) {
     S.push(["h3", "3.2 Characteristics of included studies"]);
@@ -872,7 +1043,8 @@ function buildReport() {
     }
     if (state.synthesis) {
       S.push(["h3", `3.${t.length ? 4 : 3} Themes`]);
-      S.push(["ainote", `AI-assisted draft based on the titles and abstracts of ${state.synthesis.basedOn} included studies. Check every statement against the full texts before you use it.`]);
+      const ft = state.synthesis.fullTextCount || 0;
+      S.push(["ainote", `AI-assisted draft based on ${ft ? `excerpts from the full texts of ${ft} of your documents${state.synthesis.basedOn > ft ? ` and the titles and abstracts of ${state.synthesis.basedOn - ft} other studies` : ""}` : `the titles and abstracts of ${state.synthesis.basedOn} included studies`}. Check every statement against the full texts before you use it.`]);
       for (const th of state.synthesis.themes) { S.push(["h4", th.name]); S.push(["ai", th.summary]); }
     } else S.push(["todo", "Read the included studies and group them into themes. For each theme, summarise what the studies found, where they agree and where they conflict, citing each study."]);
   }
@@ -882,7 +1054,8 @@ function buildReport() {
     if (state.synthesis.gaps?.length) { S.push(["p", "Gaps identified in the literature:"]); S.push(["ul", state.synthesis.gaps.map(citeText)]); }
   } else S.push(["todo", "Interpret the findings against your research questions, compare them with earlier reviews, and set out the gaps and a research agenda."]);
   S.push(["h3", "4.1 Limitations"]);
-  S.push(["p", `The search was limited to ${list(dbs)}${o.english ? " and to English-language publications" : ""}, so relevant studies indexed elsewhere may have been missed. Screening was carried out on titles and abstracts${pubDbs.length ? ", and some publisher records lacked an abstract in the open metadata" : ""}.`]);
+  if (docsOnly) S.push(["p", "The review covers only the documents supplied by the review team, not a systematic search of the literature, so relevant studies may be missing and the selection may reflect the team's own reading. A database search would make the review reproducible."]);
+  else S.push(["p", `The search was limited to ${list(dbs)}${o.english ? " and to English-language publications" : ""}, so relevant studies indexed elsewhere may have been missed. Screening was carried out on titles and abstracts${pubDbs.length ? ", and some publisher records lacked an abstract in the open metadata" : ""}.`]);
   S.push(["h2", "5. Conclusion"]);
   if (state.synthesis?.conclusion) S.push(["ai", state.synthesis.conclusion]);
   else S.push(["todo", "Summarise the answer to each research question in two or three sentences, and the main implications for research and practice."]);
@@ -964,7 +1137,8 @@ const fmtDate = d => new Date(d).toLocaleDateString(undefined, {day: "numeric", 
 const clip = (s, n) => (s || "").length > n ? s.slice(0, n) : s || "";
 
 function sourcePayload(db) {
-  const items = (state.raw[db] || []).map(r => ({...r, title: clip(r.title, 2000), abstract: clip(r.abstract, 20000), authors: (r.authors || []).slice(0, 100), venue: clip(r.venue, 500)}));
+  const items = (state.raw[db] || []).map(r => ({...r, title: clip(r.title, 2000), abstract: clip(r.abstract, 20000), authors: (r.authors || []).slice(0, 100), venue: clip(r.venue, 500),
+    ...(r.fullText ? { fullText: clip(r.fullText, Docs.MAX_TEXT) } : {})}));
   return { items, total: state.totals[db] ?? items.length, url: state.urls?.[db] || null, imported: state.imported[db] != null };
 }
 
@@ -1091,7 +1265,7 @@ async function loadReview(id) {
     const o = data.review.opts;
     applyOpts(o);
     Object.assign(state, {
-      opts: readOpts(), reviewId: data.review.id, review: data.review, role: data.role, synthesis: data.review.synthesis || null,
+      opts: { ...readOpts(), docsOnly: !!o.docsOnly }, reviewId: data.review.id, review: data.review, role: data.role, synthesis: data.review.synthesis || null,
       raw: Object.fromEntries(Object.entries(data.sources).map(([k, v]) => [k, v.items])),
       totals: Object.fromEntries(Object.entries(data.sources).map(([k, v]) => [k, v.total])),
       urls: Object.fromEntries(Object.entries(data.sources).map(([k, v]) => [k, v.url])),

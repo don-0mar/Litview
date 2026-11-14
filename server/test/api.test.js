@@ -206,3 +206,41 @@ test("Cohen's kappa matches a worked example", () => {
   assert.equal(r.agreement, 0.7);
   assert.equal(r.kappa, 0.4);
 });
+
+describe("the client's own documents", () => {
+  test("full text is saved with the review and the AI reads excerpts of it", async () => {
+    const { setup: _s } = await import("./helpers.js");
+    const { excerpt } = await import("../src/services/ai.js");
+    // excerpt() keeps the opening and the findings, and drops the reference list
+    const doc = "Title\nAbstract here.\n" + "Intro text. ".repeat(400) + "\n4. Results\nThe key finding is X.\n" + "More results. ".repeat(300) + "\nReferences\nSmith 2020.\n" + "Ref. ".repeat(300);
+    const ex = excerpt(doc, 3000);
+    assert.ok(ex.length <= 3010);
+    assert.match(ex, /^Title/);
+    assert.match(ex, /The key finding is X/);
+    assert.doesNotMatch(ex, /Smith 2020/);
+
+    const u = await signUp(ctx.api, "Docs");
+    const upload = { ...rec(1, { source: "upload", doi: "", title: "My own PDF on IT outsourcing" }), uploaded: true, fileName: "mine.pdf", docId: "d1", pages: 12,
+      fullText: "Full text body. The interviews showed vendor trust mattered most. ".repeat(50) };
+    const created = await ctx.api.post("/api/reviews").set(u.auth).send({ title: "Docs", topic: "IT outsourcing", opts: { docsOnly: true }, sources: { upload: { items: [upload] } } });
+    assert.equal(created.status, 201, JSON.stringify(created.body));
+    const got = await ctx.api.get(`/api/reviews/${created.body.id}`).set(u.auth);
+    assert.equal(got.body.sources.upload.items[0].fullText.length, upload.fullText.length);
+    assert.equal(got.body.review.opts.docsOnly, true);
+
+    const before = ctx.fetch.calls.length;
+    const r = await ctx.api.post(`/api/reviews/${created.body.id}/synthesis`).set(u.auth).send({ keys: ["t:my own pdf on it outsourcing"] });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.equal(r.body.synthesis.fullTextCount, 1);
+    const sent = JSON.parse(ctx.fetch.calls.slice(before).find(c => c.url.startsWith("https://api.anthropic.com/")).init.body).messages[0].content;
+    assert.match(sent, /"source":"full text"/);
+    assert.match(sent, /vendor trust mattered most/);
+  });
+
+  test("a full text over the size limit is refused", async () => {
+    const u = await signUp(ctx.api, "Big");
+    const big = { ...rec(9, { source: "upload" }), uploaded: true, fullText: "x".repeat(90000) };
+    const r = await ctx.api.post("/api/reviews").set(u.auth).send({ title: "Big", topic: "t", sources: { upload: { items: [big] } } });
+    assert.equal(r.status, 400);
+  });
+});

@@ -14,6 +14,11 @@ Litview is a web app for running a systematic literature review (SLR). Describe 
 - **Searched automatically:** OpenAlex, Crossref, Europe PMC, arXiv, and the ScienceDirect, Taylor & Francis, Wiley, Springer, Emerald, IEEE Xplore and ACM collections. Missing abstracts are filled in from OpenAlex.
 - **Login databases:** for Scopus, ProQuest, JSTOR and EBSCOhost, Litview writes the search string in each database's syntax and imports the RIS, BibTeX or CSV file you export. Scopus is searched directly when the server has an API key.
 
+**Your own documents**
+- Upload PDFs or text files of studies you already have, and base the review on them alone or add them to a database search.
+- Litview reads each file in the browser with pdf.js: title, authors, year, DOI, abstract and full text. Details are checked against OpenAlex when a DOI is found, and can be edited. Scanned PDFs without a text layer are flagged.
+- The AI synthesis reads excerpts of the full text of uploaded documents, not just abstracts, and the report states plainly when a review rests on supplied documents rather than a systematic search.
+
 **Screening**
 - Duplicates are removed by DOI and normalised title. Records that fail your criteria are excluded automatically, with a reason.
 - **Team screening:** invite colleagues with a code. Everyone screens blind, disagreements go to a Conflicts list for the owner to settle, and agreement is reported as Cohen's kappa.

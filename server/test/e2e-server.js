@@ -24,7 +24,10 @@ const oaWork = (i) => ({ id: `W${i}`, doi: `https://doi.org/10.5555/lit.${i}`, t
 const fetch = fakeFetch([
   [u => u === "https://oauth2.googleapis.com/token", () => ({ json: { access_token: "t" } })],
   [u => u.startsWith("https://openidconnect.googleapis.com/"), () => ({ json: { sub: "g-1", name: "Omar Hassan", email: "omar@gmail.com", email_verified: true } })],
-  [u => u.startsWith("https://api.openalex.org/works?filter=doi"), () => ({ json: { results: [] } })],
+  [u => u.startsWith("https://api.openalex.org/works?filter=doi"), u => ({ json: { results: decodeURIComponent(u).includes("10.5555/upload.1") ? [{
+    doi: "https://doi.org/10.5555/upload.1", title: "Vendor trust and IT outsourcing success in Malaysian SMEs: a survey study", publication_year: 2023,
+    authorships: [{ author: { display_name: "Nur Aisyah Rahman" } }, { author: { display_name: "Daniel Lim" } }, { author: { display_name: "Priya Menon" } }],
+    primary_location: { source: { display_name: "Journal of Enterprise Information Management" } }, cited_by_count: 17, open_access: { is_oa: false } }] : [] } })],
   [u => u.startsWith("https://api.openalex.org/"), () => ({ json: { meta: { count: 812 }, results: Array.from({ length: 10 }, (_, i) => oaWork(i + 1)) } })],
   [u => u.startsWith("https://api.crossref.org/"), () => ({ json: { message: { "total-results": 2400, items: [3, 4, 11, 12].map(i => ({
     DOI: `10.5555/lit.${i}`, title: [i > 10 ? `Offshore software outsourcing for SMEs: case ${i}` : oaWork(i).title], author: [{ given: "Lee", family: "Kim" }],

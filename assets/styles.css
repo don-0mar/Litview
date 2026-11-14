@@ -235,3 +235,23 @@ footer{color:var(--muted);font-size:.86rem;padding:30px 0 40px;border-top:1px so
 .social-btns .btn{width:100%;text-align:center;padding:10px 14px}
 .or{display:flex;align-items:center;gap:10px;color:var(--muted);font-size:.86rem;margin:18px 0 14px}
 .or::before,.or::after{content:"";flex:1;border-top:1px solid var(--rule)}
+
+/* ---------- the client's own documents ---------- */
+.query.dragging{outline:3px dashed var(--blue);outline-offset:4px}
+.docs{border-top:1px solid var(--rule);padding:12px 18px;display:grid;gap:10px}
+.docs .doclist{display:flex;gap:6px;flex-wrap:wrap}
+.docs .docchip{display:inline-flex;align-items:center;gap:6px;background:var(--paper);border-radius:999px;padding:3px 6px 3px 12px;font-size:.86rem;max-width:100%}
+.docs .docchip span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:260px}
+.docs .docchip button{border:0;background:transparent;cursor:pointer;color:var(--muted);font-size:1rem;line-height:1;padding:2px 6px;border-radius:999px}
+.docs .docchip button:hover{background:var(--rule);color:var(--ink)}
+.docs .mode{display:flex;gap:18px;flex-wrap:wrap;font-size:.92rem}
+.docs .mode label{display:flex;gap:6px;align-items:center;cursor:pointer}
+.docs .mode input{accent-color:var(--blue)}
+.docs .hint{margin:0}
+.tag.mine{border-color:var(--ink);color:var(--ink);background:var(--mark-soft)}
+.editdoc{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px;padding:12px;border:1px dashed var(--rule);border-radius:var(--r-sm)}
+.editdoc label{font-size:.82rem;font-weight:700;display:grid;gap:4px}
+.editdoc input{border:1px solid var(--rule);border-radius:var(--r-sm);padding:6px 8px;font-weight:400}
+.editdoc .wide{grid-column:1/-1}
+.editdoc .acts{grid-column:1/-1;display:flex;gap:8px}
+@media (max-width:560px){.editdoc{grid-template-columns:1fr}}

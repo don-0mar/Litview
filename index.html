@@ -27,13 +27,14 @@
 
   <section class="hero" aria-labelledby="heroTitle">
     <h1 id="heroTitle">Start a systematic literature review.</h1>
-    <p class="lede">Describe your topic. Litview searches open scholarly databases, removes duplicates, helps you screen each study and drafts the review with a PRISMA flow diagram.</p>
+    <p class="lede">Describe your topic. Litview searches scholarly databases, or reads the papers you upload, then helps you screen each study and drafts the review with a PRISMA flow diagram.</p>
 
     <form id="queryForm" class="query" autocomplete="off">
       <div class="query-main">
         <label for="topic" class="sr">Research topic</label>
         <textarea id="topic" rows="1" placeholder="What would you like to research about?" required></textarea>
       </div>
+      <div class="docs" id="docs" hidden></div>
 
       <div class="refine" id="refine">
         <div><div class="refine-inner">
@@ -145,6 +146,7 @@
       <div class="query-bar">
         <div class="chips" id="chips" aria-live="polite"></div>
         <div class="bar-actions">
+          <label class="btn ghost filebtn" id="addDocsBtn">Add documents<input type="file" id="docInput" accept=".pdf,.txt,.md" multiple aria-label="Add your own documents (PDF or text)"></label>
           <button type="button" class="btn ghost" id="refineBtn" aria-expanded="false" aria-controls="refine">Refine search</button>
           <button type="submit" class="btn primary" id="runBtn">Run search</button>
         </div>
@@ -230,7 +232,7 @@
   </main>
 
   <footer>
-    <p>Litview searches OpenAlex, Crossref, Europe PMC, arXiv and publisher collections through their free public APIs, straight from your browser, and imports exports from Scopus, ProQuest, JSTOR and EBSCOhost. Nothing is stored on a server. The draft is a structured starting point: the synthesis and conclusions are yours to write.</p>
+    <p>Litview searches OpenAlex, Crossref, Europe PMC, arXiv and publisher collections through their free public APIs, straight from your browser, and imports exports from Scopus, ProQuest, JSTOR and EBSCOhost. Documents you upload are read in your browser, and nothing is kept unless you sign in and save a review. The draft is a structured starting point: the synthesis and conclusions are yours to write.</p>
   </footer>
 </div>
 <div class="toast" id="toast" role="status"></div>
@@ -277,6 +279,7 @@
 </dialog>
 
 <script src="assets/api.js"></script>
+<script src="assets/documents.js"></script>
 <script src="assets/app.js"></script>
 </body>
 </html>
