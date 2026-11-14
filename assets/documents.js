@@ -5,6 +5,10 @@
 (() => {
   "use strict";
   const PDFJS = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/";
+  // Tesseract.js fetches its worker, engine and language data from jsDelivr by default.
+  const TESSERACT = "https://cdn.jsdelivr.net/npm/tesseract.js@7.0.0/dist/tesseract.min.js";
+  const OCR_LANGS = { eng: "English", msa: "Malay" };
+  const OCR_MAX_PAGES = 40;
   const MAX_PAGES = 60;          // pages read per document
   const MAX_TEXT = 60000;        // characters of full text kept per document
   const MAX_BYTES = 50 * 1024 * 1024;
@@ -17,6 +21,18 @@
       s.src = PDFJS + "pdf.min.js";
       s.onload = () => { window.pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS + "pdf.worker.min.js"; resolve(window.pdfjsLib); };
       s.onerror = () => { loading = null; reject(new Error("Couldn't load the PDF reader. Check your connection and try again.")); };
+      document.head.appendChild(s);
+    });
+  }
+
+  let tessLoading = null;
+  function tesseract() {
+    if (window.Tesseract) return Promise.resolve(window.Tesseract);
+    return tessLoading ||= new Promise((resolve, reject) => {
+      const s = document.createElement("script");
+      s.src = TESSERACT;
+      s.onload = () => resolve(window.Tesseract);
+      s.onerror = () => { tessLoading = null; reject(new Error("Couldn't load the OCR reader. Check your connection and try again.")); };
       document.head.appendChild(s);
     });
   }
@@ -109,7 +125,13 @@
       page.cleanup();
       if (text.length > MAX_TEXT * 1.5) break;
     }
+    const total = doc.numPages;
     await doc.destroy();
+    return fromText({ text, firstLines, meta, fileName: file.name, pages: total });
+  }
+
+  /** Work out a record's details from its text and first-page lines. Shared by normal reading and OCR. */
+  function fromText({ text, firstLines, meta = {}, fileName, pages }) {
     text = clean(text);
     const noText = text.replace(/\s/g, "").length < 200;
 
@@ -119,7 +141,7 @@
     const firstPage = firstLines.map(l => l.text).join(" ").toLowerCase();
     const metaOnPage = plausibleMetaTitle(metaTitle) && firstPage.includes(metaTitle.toLowerCase().slice(0, 25));
     let title = metaOnPage ? metaTitle : (fromPage.title && fromPage.title.length >= 8 ? fromPage.title : (plausibleMetaTitle(metaTitle) ? metaTitle : ""));
-    if (!title) title = titleFromFileName(file.name);
+    if (!title) title = titleFromFileName(fileName);
 
     let authors = clean(meta.Author || "").split(/\s*(?:;|,|\band\b|&)\s*/).filter(looksLikeName);
     if (!authors.length && fromPage.after != null) {
@@ -131,8 +153,76 @@
     return {
       // A PDF with no text has nothing to date it by but the file's own creation date, which is when it was scanned: leave the year empty.
       title, authors, year: noText ? null : findYear(text, meta), doi: findDoi(text.slice(0, 20000)), venue: "",
-      abstract: noText ? "" : findAbstract(text, title), fullText: noText ? "" : text.slice(0, MAX_TEXT), pages: doc.numPages, noText,
+      abstract: noText ? "" : findAbstract(text, title), fullText: noText ? "" : text.slice(0, MAX_TEXT), pages, noText,
     };
+  }
+
+  /* ---------- OCR for scanned PDFs ---------- */
+
+  /** Lines of the first page from Tesseract's block output, with their height standing in for font size. */
+  function ocrLines(blocks) {
+    const lines = [];
+    for (const b of blocks || []) for (const p of b.paragraphs || []) for (const l of p.lines || []) {
+      const text = (l.text || "").replace(/\s+/g, " ").trim();
+      // rowHeight stays the same for every line set in one font size; the box height changes with letters like g and y.
+      const size = l.rowAttributes?.rowHeight || (l.bbox ? l.bbox.y1 - l.bbox.y0 : 0);
+      if (text && l.bbox) lines.push({ text, size: Math.round(size), y: l.bbox.y0 });
+    }
+    return lines.sort((a, b) => a.y - b.y);
+  }
+
+  /**
+   * Read a scanned PDF with OCR: draw each page as an image with pdf.js, then recognise it with Tesseract.
+   * opts: { langs: ["eng"], maxPages, onProgress({stage, page, of, progress}), signal }
+   */
+  async function ocr(file, { langs = ["eng"], maxPages = OCR_MAX_PAGES, onProgress, signal } = {}) {
+    if (!/\.pdf$/i.test(file.name) && file.type !== "application/pdf") throw new Error("OCR works on PDF files.");
+    const stop = () => { if (signal?.aborted) throw new DOMException("OCR was cancelled.", "AbortError"); };
+    onProgress?.({ stage: "loading" });
+    const [lib, T] = await Promise.all([pdfjs(), tesseract()]);
+    stop();
+    const doc = await lib.getDocument({ data: new Uint8Array(await file.arrayBuffer()), isEvalSupported: false }).promise;
+    let worker = null;
+    try {
+      const pages = Math.min(doc.numPages, maxPages);
+      let current = 0;
+      worker = await T.createWorker(langs, 1, {
+        logger: m => {
+          if (m.status === "recognizing text") onProgress?.({ stage: "reading", page: current, of: pages, progress: m.progress });
+          else if (/loading|initiali/.test(m.status || "")) onProgress?.({ stage: "loading", progress: m.progress });
+        },
+      });
+      let text = "", firstLines = [], conf = [];
+      for (let p = 1; p <= pages; p++) {
+        stop();
+        current = p;
+        onProgress?.({ stage: "reading", page: p, of: pages, progress: 0 });
+        const page = await doc.getPage(p);
+        // About 2,000 pixels wide (roughly 240 dpi on A4): sharp enough for small print, small enough to stay quick.
+        const base = page.getViewport({ scale: 1 });
+        const viewport = page.getViewport({ scale: Math.min(3, Math.max(1.5, 2000 / base.width)) });
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.ceil(viewport.width); canvas.height = Math.ceil(viewport.height);
+        const ctx = canvas.getContext("2d", { willReadFrequently: true });
+        ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, canvas.width, canvas.height);
+        await page.render({ canvasContext: ctx, viewport }).promise;
+        // Cancelling takes effect between pages: stopping Tesseract mid-page leaves it in a broken state.
+        const { data } = await worker.recognize(canvas, {}, p === 1 ? { text: true, blocks: true } : { text: true });
+        if (p === 1) firstLines = ocrLines(data.blocks);
+        if (data.confidence != null) conf.push(data.confidence);
+        text += (data.text || "") + "\n\n";
+        canvas.width = canvas.height = 0;
+        page.cleanup();
+      }
+      stop();
+      let meta = {};
+      try { meta = (await doc.getMetadata()).info || {}; } catch { /* no metadata */ }
+      const r = fromText({ text, firstLines, meta, fileName: file.name, pages: doc.numPages });
+      return { ...r, ocr: true, ocrLangs: langs, ocrPages: pages, ocrConfidence: conf.length ? Math.round(conf.reduce((a, b) => a + b, 0) / conf.length) : null };
+    } finally {
+      if (worker) await worker.terminate().catch(() => {});
+      await doc.destroy();
+    }
   }
 
   async function readTxt(file) {
@@ -162,5 +252,5 @@
     };
   }
 
-  window.LitviewDocs = { read, supported, ACCEPT, MAX_TEXT };
+  window.LitviewDocs = { read, ocr, supported, ACCEPT, MAX_TEXT, OCR_LANGS, OCR_MAX_PAGES };
 })();

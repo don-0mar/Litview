@@ -255,3 +255,12 @@ footer{color:var(--muted);font-size:.86rem;padding:30px 0 40px;border-top:1px so
 .editdoc .wide{grid-column:1/-1}
 .editdoc .acts{grid-column:1/-1;display:flex;gap:8px}
 @media (max-width:560px){.editdoc{grid-template-columns:1fr}}
+
+/* ---------- OCR ---------- */
+.ocrbox{margin-top:10px;padding:10px 12px;border:1px dashed var(--rule);border-radius:var(--r-sm);display:grid;gap:8px}
+.ocrbox .hint{margin:0}
+.ocrbox .acts{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.ocrbox .ocrlang{font-size:.86rem;display:flex;gap:6px;align-items:center}
+.ocrbox select{border:1px solid var(--rule);border-radius:var(--r-sm);padding:4px 6px;background:#fff}
+.ocrbox.busy{display:flex;align-items:center;justify-content:space-between;gap:10px;border-style:solid;border-color:var(--blue);background:var(--blue-soft)}
+.ocrbox.busy .ocrmsg{font-size:.9rem}

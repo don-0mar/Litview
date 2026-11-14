@@ -87,6 +87,9 @@ renderChips();
 /* ---------- the client's own documents ---------- */
 const Docs = window.LitviewDocs;
 const parsedDocs = new Map();         // file signature -> promise of its record, so a re-run doesn't read twice
+const docFiles = new Map();           // record docId -> its File, for OCR later in the session
+let ocrJob = null;                    // { docId, controller, msg } while a scan is being read
+let ocrLangChoice = "eng";
 const sig = f => `${f.name}|${f.size}|${f.lastModified}`;
 function addPendingDocs(files) {
   const all = [...files], ok = all.filter(f => Docs.supported(f));
@@ -124,7 +127,7 @@ async function readDocs(files, onProgress) {
   for (const f of files) {
     const k = sig(f);
     if (!parsedDocs.has(k)) parsedDocs.set(k, Docs.read(f));
-    try { records.push({ ...(await parsedDocs.get(k)) }); }
+    try { const rec = { ...(await parsedDocs.get(k)) }; docFiles.set(rec.docId, f); records.push(rec); }
     catch (e) {
       parsedDocs.delete(k); errors.push(e.message);
       if (/PDF reader/.test(e.message)) break; // the reader itself didn't load: no point trying the rest
@@ -622,7 +625,7 @@ async function run(o, forceSample = false) {
       docErrors = errors;
       if (records.length) { state.raw.upload = records; state.totals.upload = records.length; }
       const scanned = records.filter(x => x.noText).length;
-      lines.upload = { cls: records.length ? "ok" : "err", msg: `${records.length} of ${docs.length} read${errors.length ? `. ${errors.length} couldn't be read` : ""}${scanned ? `. ${scanned} had no text (scanned?)` : ""}` };
+      lines.upload = { cls: records.length ? "ok" : "err", msg: `${records.length} of ${docs.length} read${errors.length ? `. ${errors.length} couldn't be read` : ""}${scanned ? `. ${scanned} had no text (scanned?): read ${scanned === 1 ? "it" : "them"} with OCR in Screening` : ""}` };
       draw();
     }
     await Promise.all(live.map(async d => {
@@ -783,11 +786,13 @@ function recHTML(r) {
       <h4>${titleHTML}</h4>
       <div class="meta">${esc(authorLine(r.authors) || "Unknown authors")} (${r.year || "n.d."})${r.venue ? ". " + esc(r.venue) : ""}. ${r.noCites ? "Citations not reported" : `Cited ${r.cites}`}.</div>
       ${r.abstract ? `<p class="abs clamp">${esc(r.abstract)}</p>` : ""}
+      ${r.uploaded && r.noText && r.docId ? ocrHTML(r) : ""}
       <div class="tags">
         <span class="tag">${TYPE_LABEL(r.type)}</span>
         ${[...r.foundIn].filter(s => !(s === "upload" && r.uploaded)).map(s => `<span class="tag">${DB_NAMES[s]}</span>`).join("")}
         ${r.uploaded ? `<span class="tag mine" title="${esc(r.fileName || "")}">Your document${r.pages ? `, ${r.pages} page${r.pages === 1 ? "" : "s"}` : ""}</span>` : ""}
         ${r.noText ? `<span class="tag reason">No text found. Scanned PDF?</span>` : ""}
+        ${r.ocr ? `<span class="tag" title="Recognised from scanned pages. It may contain misread words.">Text from OCR${r.ocrConfidence ? `, ${r.ocrConfidence}% confidence` : ""}</span>` : ""}
         ${r.oa ? `<span class="tag oa">Open access</span>` : ""}
         ${r.sample ? `<span class="tag sample">Sample record</span>` : ""}
         ${r.status === "excluded" && r.reason ? `<span class="tag reason">${esc(r.reason)}</span>` : ""}
@@ -799,7 +804,7 @@ function recHTML(r) {
     ${decideHTML(r)}
   </li>`;
 }
-const rowSig = r => [r.status, r.reason, r.conflict, r.teamState, r.mine?.status, r.mine?.reason, state.role].join("|");
+const rowSig = r => [r.status, r.reason, r.conflict, r.teamState, r.mine?.status, r.mine?.reason, state.role, r.noText, ocrJob?.docId === r.docId].join("|");
 /** Re-render only the rows whose status changed, so focus and scroll stay put. */
 function syncRows() {
   for (const li of $$("#recs .rec")) {
@@ -838,6 +843,61 @@ function teamTags(r) {
   if (!r.mine && !r.auto && !r.conflict) out.push(`<span class="tag pending">Not screened by you yet</span>`);
   return out.join("");
 }
+/* ---------- OCR for scanned documents ---------- */
+const OCR_CHOICES = { eng: "English", msa: "Malay", "eng+msa": "English and Malay" };
+function ocrHTML(r) {
+  if (ocrJob?.docId === r.docId) return `<div class="ocrbox busy" data-doc="${r.docId}" aria-live="polite">
+      <span class="ocrmsg">${esc(ocrJob.msg)}</span><button type="button" class="btn small ghost" data-act="ocrcancel">Cancel</button></div>`;
+  const pick = `<label class="ocrlang">Language <select data-ocrlang>${Object.entries(OCR_CHOICES).map(([v, l]) => `<option value="${v}" ${v === ocrLangChoice ? "selected" : ""}>${l}</option>`).join("")}</select></label>`;
+  const go = docFiles.has(r.docId)
+    ? `<button type="button" class="btn small primary" data-act="ocr">Read scanned pages</button>`
+    : `<label class="btn small primary filebtn">Choose the PDF to read<input type="file" accept=".pdf" data-ocrfile aria-label="Choose ${esc(r.fileName || "the PDF")} to read with OCR"></label>`;
+  return `<div class="ocrbox" data-doc="${r.docId}">
+      <p class="hint">This looks like a scan. Litview can recognise the text in your browser, which takes a few seconds a page (up to ${Docs.OCR_MAX_PAGES} pages).${docFiles.has(r.docId) ? "" : ` Choose ${esc(r.fileName || "the file")} again to read it.`}</p>
+      <div class="acts">${pick}${go}</div>
+    </div>`;
+}
+function rerenderDoc(docId) {
+  for (const li of $$("#recs .rec")) {
+    const rec = state.records.find(x => x.id === +li.dataset.id);
+    if (rec?.docId === docId) { li.outerHTML = recHTML(rec); return; }
+  }
+}
+async function startOcr(r, file) {
+  if (ocrJob) { toast("Wait for the current scan to finish, or cancel it."); return; }
+  const docId = r.docId;
+  ocrJob = { docId, controller: new AbortController(), msg: "Loading the OCR reader…" };
+  rerenderDoc(docId);
+  const setMsg = m => { if (!ocrJob || ocrJob.controller.signal.aborted) return; ocrJob.msg = m; const el = document.querySelector(`.ocrbox[data-doc="${docId}"] .ocrmsg`); if (el) el.textContent = m; };
+  const pct = p => p > 0 && p < 1 ? ` (${Math.round(p * 100)}%)` : "";
+  try {
+    const res = await Docs.ocr(file, {
+      langs: ocrLangChoice.split("+"), signal: ocrJob.controller.signal,
+      onProgress: e => setMsg(e.stage === "loading" ? `Downloading the OCR reader and language data${pct(e.progress)}…` : `Reading page ${e.page} of ${e.of}${pct(e.progress)}…`),
+    });
+    const raw = (state.raw.upload || []).find(x => x.docId === docId);
+    if (!raw) return;
+    if (res.noText) { toast("OCR found no readable text in this file."); return; }
+    const oldKey = recKey(withEnrichment(raw));
+    // Details the client typed themselves stay as they are.
+    const keep = raw.edited ? { title: raw.title, authors: raw.authors, year: raw.year, doi: raw.doi, venue: raw.venue } : {};
+    Object.assign(raw, res, keep, { noText: false });
+    docFiles.set(docId, file);
+    if (raw.doi && !state.sample) await enrich([raw]);
+    const newKey = recKey(withEnrichment(raw));
+    if (oldKey !== newKey && state.decisions[oldKey]) { state.decisions[newKey] = state.decisions[oldKey]; delete state.decisions[oldKey]; queueDecision(newKey); }
+    ocrJob = null;
+    rebuild(); renderRecs(); refreshCounts(); renderImports();
+    if (state.reviewId) Api.putSource(state.reviewId, "upload", sourcePayload("upload")).catch(x => toast(`Not saved: ${x.message}`));
+    toast(`Read ${res.ocrPages} page${res.ocrPages === 1 ? "" : "s"}${res.pages > res.ocrPages ? ` of ${res.pages}` : ""}. Check the details: OCR can misread words.`);
+  } catch (e) {
+    const why = e?.message || (typeof e === "string" ? e : "");
+    toast(e?.name === "AbortError" ? "OCR cancelled" : why ? `OCR failed: ${why.replace(/^Error:\s*/, "")}` : "OCR failed. Try again.");
+  } finally {
+    if (ocrJob?.docId === docId) { ocrJob = null; rerenderDoc(docId); }
+  }
+}
+
 /* ---------- editing an uploaded document's details ---------- */
 function openDocEditor(li, r) {
   if (li.querySelector(".editdoc")) return;
@@ -876,6 +936,13 @@ function renderRecs() {
 $("#recs").addEventListener("click", e => {
   const b = e.target.closest("[data-act]"); if (!b || b.tagName === "SELECT") return;
   const li = b.closest(".rec"); const r = state.records.find(x => x.id === +li.dataset.id);
+  if (b.dataset.act === "ocr") return startOcr(r, docFiles.get(r.docId));
+  if (b.dataset.act === "ocrcancel") {
+    if (!ocrJob) return;
+    ocrJob.controller.abort(); ocrJob.msg = "Stopping after this page…";
+    const m = li.querySelector(".ocrmsg"); if (m) m.textContent = ocrJob.msg;
+    b.disabled = true; return;
+  }
   if (b.dataset.act === "editdoc") return openDocEditor(li, r);
   if (b.dataset.act === "canceldoc") { li.outerHTML = recHTML(r); return; }
   if (b.dataset.act === "savedoc") return saveDocEdits(li, r);
@@ -891,6 +958,13 @@ $("#recs").addEventListener("click", e => {
   queueDecision(r.key);
 });
 $("#recs").addEventListener("change", e => {
+  if (e.target.matches("[data-ocrlang]")) { ocrLangChoice = e.target.value; return; }
+  if (e.target.matches("[data-ocrfile]")) {
+    const f = e.target.files[0]; e.target.value = "";
+    const rec = state.records.find(x => x.id === +e.target.closest(".rec").dataset.id);
+    if (f && rec) startOcr(rec, f);
+    return;
+  }
   if (e.target.dataset.act !== "reason") return;
   const r = state.records.find(x => x.id === +e.target.closest(".rec").dataset.id);
   state.decisions[r.key] = {status: "excluded", reason: e.target.value}; applyStatuses();
@@ -1005,6 +1079,8 @@ function buildReport() {
       S.push(["ul", impDbs.map(d => `${DB_NAMES[d]}: ${importString(d, o)} (${state.imported[d]} records)`)]);
     }
   }
+  const nOcr = (state.raw.upload || []).filter(x => x.ocr).length;
+  if (nOcr) S.push(["p", `The text of ${nOcr} scanned document${nOcr === 1 ? " was" : "s were"} recognised with optical character recognition (Tesseract), so details and quotations from ${nOcr === 1 ? "it" : "them"} should be checked against the original${nOcr === 1 ? "" : "s"}.`]);
   S.push(["h3", "2.2 Eligibility criteria"]);
   const incl = docsOnly ? ["Addresses the review topic"] : [`Published between ${o.yFrom} and ${o.yTo}`, `Document type: ${o.docTypes.map(x => typeNames[x]).join(", ") || "any"}`];
   if (o.caseStudy) incl.push("Study design: case study, as stated in the title or abstract");

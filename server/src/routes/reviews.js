@@ -34,6 +34,10 @@ const Record = z.object({
   pages: z.number().int().nullable().optional(),
   noText: z.boolean().optional(),
   edited: z.boolean().optional(),
+  ocr: z.boolean().optional(),
+  ocrLangs: z.array(z.string().max(10)).max(3).optional(),
+  ocrPages: z.number().int().optional(),
+  ocrConfidence: z.number().nullable().optional(),
 }).passthrough();
 
 const Source = z.object({
